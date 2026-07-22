@@ -176,25 +176,30 @@ https://workflow.iitm.ac.in/student/
         smtp.send_message(msg)
         
 def ntfy_notify(course, name, vacancies, slot):
+    print("Before POST")
+
     r = requests.post(
         f"https://ntfy.sh/{NTFY_TOPIC}",
         data=(
             f"🎉 {course} is available!\n\n"
             f"{name}\n"
             f"Vacancies: {vacancies}\n"
-            f"Slot: {slot}\n\n"
-            f"https://workflow.iitm.ac.in/student/"
+            f"Slot: {slot}"
         ).encode("utf-8"),
         headers={
             "Title": "Workflow Vacancy",
             "Priority": "urgent",
             "Tags": "tada,books",
         },
-        timeout=10,
+        timeout=(10, 10),
     )
 
+    print("After POST")
+    print(r.status_code)
+
     r.raise_for_status()
-    print("✓ ntfy notification sent")
+
+    print("Done")
 
 def fetch_courses():
 
