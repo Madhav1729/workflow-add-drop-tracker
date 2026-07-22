@@ -116,23 +116,20 @@ def workflow_login(workflow_password):
 
     print("✓ Logged into Workflow")
     
-def ntfy_notify(course, name, vacancies, slot):
+import traceback
 
-    requests.post(
-    f"https://ntfy.sh/{NTFY_TOPIC}",
-    data=(
-    f"🎉 {course} is available!\n\n"
-    f"{name}\n"
-    f"Vacancies: {vacancies}\n"
-    f"Slot: {slot}"
-).encode("utf-8"),
-    headers={
-        "Title": "Workflow Vacancy",
-        "Priority": "urgent",
-        "Tags": "warning,books",
-    },
-    timeout=10,
-)
+def notify(course, name, vacancies, slot):
+    try:
+        ntfy_notify(course, name, vacancies, slot)
+    except Exception:
+        print("ntfy failed:")
+        traceback.print_exc()
+
+    try:
+        email_notify(course, name, vacancies, slot)
+    except Exception:
+        print("email failed:")
+        traceback.print_exc()
 import smtplib
 from email.message import EmailMessage
 
@@ -338,16 +335,17 @@ def monitor():
             time.sleep(CHECK_INTERVAL)
             
 if __name__ == "__main__":
-    try:
-        r = requests.get("https://www.google.com", timeout=10)
-        print("Google:", r.status_code)
-    except Exception as e:
-        print("Google failed:", e)
-    try:
-        r = requests.get("https://ntfy.sh", timeout=10)
-        print("ntfy:", r.status_code)
-    except Exception as e:
-        print("ntfy failed:", e)
+    import requests
+
+    for url in [
+        "https://www.google.com",
+        "https://ntfy.sh",
+    ]:
+        try:
+            r = requests.get(url, timeout=10)
+            print(url, r.status_code)
+        except Exception as e:
+            print(url, e)
     workflow_login(PROXY_PASS)
 
     monitor()
