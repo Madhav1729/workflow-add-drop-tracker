@@ -335,17 +335,18 @@ def monitor():
             time.sleep(CHECK_INTERVAL)
             
 if __name__ == "__main__":
-    import requests
+    import socket
 
-    for url in [
-        "https://www.google.com",
-        "https://ntfy.sh",
+    for host in [
+        "www.google.com",
+        "ntfy.sh",
+        "smtp.gmail.com",
     ]:
+        print(f"\nResolving {host}...")
         try:
-            r = requests.get(url, timeout=10)
-            print(url, r.status_code)
+            print(socket.getaddrinfo(host, 443))
         except Exception as e:
-            print(url, e)
+            print(e)
     workflow_login(PROXY_PASS)
 
     monitor()
