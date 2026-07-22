@@ -161,17 +161,26 @@ https://workflow.iitm.ac.in/student/
         smtp.login(GMAIL, APP_PASSWORD)
         smtp.send_message(msg)
         
-def notify(course, name, vacancies, slot):
+def ntfy_notify(course, name, vacancies, slot):
+    r = requests.post(
+        f"https://ntfy.sh/{NTFY_TOPIC}",
+        data=(
+            f"🎉 {course} is available!\n\n"
+            f"{name}\n"
+            f"Vacancies: {vacancies}\n"
+            f"Slot: {slot}\n\n"
+            f"https://workflow.iitm.ac.in/student/"
+        ).encode("utf-8"),
+        headers={
+            "Title": "Workflow Vacancy",
+            "Priority": "urgent",
+            "Tags": "tada,books",
+        },
+        timeout=10,
+    )
 
-    try:
-        ntfy_notify(course, name, vacancies, slot)
-    except Exception as e:
-        print("ntfy failed:", e)
-
-    try:
-        email_notify(course, name, vacancies, slot)
-    except Exception as e:
-        print("email failed:", e)
+    r.raise_for_status()
+    print("✓ ntfy notification sent")
 
 def fetch_courses():
 
