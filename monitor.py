@@ -17,10 +17,8 @@ NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 PERIOD = "123"
 
 WATCH_COURSES = [
-    "AM2001",
-    "CS6886"
-    # "CS6024",
-    # "CS6700",
+    course.strip()
+    for course in os.environ["WATCH_COURSES"].split(",")
 ]
 
 CHECK_INTERVAL = 10
