@@ -2,9 +2,16 @@ import time
 import requests
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
-import subprocess
 from bs4 import BeautifulSoup
 import os
+import smtplib
+from email.message import EmailMessage
+import re
+from dotenv import load_dotenv
+
+# Load the variables from the .env file into the system environment
+load_dotenv()
+
 # ==========================
 # CONFIGURATION
 # ==========================
@@ -13,19 +20,22 @@ PROXY_USER = os.environ["IITM_USER"]
 PROXY_PASS = os.environ["IITM_PASS"]
 NTFY_TOPIC = os.environ["NTFY_TOPIC"]
 
+GMAIL = os.environ["MAIL_USER"]
+APP_PASSWORD = os.environ["MAIL_APP_PASSWORD"]
+TO = os.environ["MAIL_TO"]
 
-PERIOD = "123"
+PERIOD = os.getenv("PERIOD", "123")
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "10"))
+HEARTBEAT_INTERVAL = 3 * 60 * 60
 
-WATCH_COURSES = [
-    course.strip()
-    for course in os.environ["WATCH_COURSES"].split(",")
-]
-
-CHECK_INTERVAL = 10
-
-# ==========================
-# PROXY
-# ==========================
+WATCH_REGEX = os.getenv("WATCH_REGEX")
+if WATCH_REGEX:
+    WATCH_PATTERN = re.compile(WATCH_REGEX)
+    WATCH_COURSES = []
+else:
+    WATCH_PATTERN = None
+    watch_courses_env = os.getenv("WATCH_COURSES", "")
+    WATCH_COURSES = [c.strip() for c in watch_courses_env.split(",") if c.strip()]
 
 # ==========================
 # PROXY
@@ -33,10 +43,7 @@ CHECK_INTERVAL = 10
 
 encoded_password = quote(PROXY_PASS, safe="")
 
-PROXY_URL = (
-    f"https://{PROXY_USER}:{encoded_password}"
-    "@remote.iitm.ac.in:8372"
-)
+PROXY_URL = f"https://{PROXY_USER}:{encoded_password}@remote.iitm.ac.in:8372"
 
 session = requests.Session()
 
@@ -49,10 +56,7 @@ LOGIN_URL = "https://workflow.iitm.ac.in/student/"
 AUTH_URL = "https://workflow.iitm.ac.in/student/Authenticate.aspx"
 
 LOGIN_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64; rv:141.0) "
-        "Gecko/20100101 Firefox/141.0"
-    ),
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
     "Referer": LOGIN_URL,
@@ -72,6 +76,7 @@ URL = (
     "WebServices/CurriculumServices.asmx/"
     "GetElectiveCoursesDetailsAddDrop"
 )
+
 
 # ==========================
 # API
@@ -115,94 +120,9 @@ def workflow_login(workflow_password):
         raise RuntimeError("Workflow login failed.")
 
     print("✓ Logged into Workflow")
-    
-import traceback
 
-def notify(course, name, vacancies, slot):
-    print("-> Sending ntfy")
-    try:
-        ntfy_notify(course, name, vacancies, slot)
-    except Exception:
-        print("ntfy failed:")
-        traceback.print_exc()
-
-    print("-> Sending email")
-    try:
-        email_notify(course, name, vacancies, slot)
-    except Exception:
-        print("email failed:")
-        traceback.print_exc()
-
-    print("-> notify() finished")
-import smtplib
-from email.message import EmailMessage
-
-GMAIL = os.environ["MAIL_USER"]
-APP_PASSWORD = os.environ["MAIL_APP_PASSWORD"]
-TO = os.environ["MAIL_TO"]
-
-def email_notify(course, name, vacancies, slot):
-    print("Entered email_notify")
-
-    msg = EmailMessage()
-
-    msg["Subject"] = f"Workflow Vacancy - {course}"
-    msg["From"] = GMAIL
-    msg["To"] = TO
-
-    msg.set_content(
-        f"""
-Course    : {course}
-Name      : {name}
-Vacancies : {vacancies}
-Slot      : {slot}
-
-Workflow:
-https://workflow.iitm.ac.in/student/
-"""
-    )
-    print("Connecting to Gmail...")
-
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
-        print("Connected")
-        smtp.login(GMAIL, APP_PASSWORD)
-        print("Logged in")
-        smtp.send_message(msg)
-        print("Email sent")
-
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
-        smtp.starttls()
-        smtp.login(GMAIL, APP_PASSWORD)
-        smtp.send_message(msg)
-        
-def ntfy_notify(course, name, vacancies, slot):
-    print("Before POST")
-    print(requests.get("https://ntfy.sh", timeout=10).status_code)
-    r = requests.post(
-        f"https://ntfy.sh/{NTFY_TOPIC}",
-        data=(
-            f"🎉 {course} is available!\n\n"
-            f"{name}\n"
-            f"Vacancies: {vacancies}\n"
-            f"Slot: {slot}"
-        ).encode("utf-8"),
-        headers={
-            "Title": "Workflow Vacancy",
-            "Priority": "urgent",
-            "Tags": "tada,books",
-        },
-        timeout=(10, 10),
-    )
-
-    print("After POST")
-    print(r.status_code)
-
-    r.raise_for_status()
-
-    print("Done")
 
 def fetch_courses():
-
     try:
         response = session.post(
             URL,
@@ -219,12 +139,9 @@ def fetch_courses():
             raise RuntimeError("Session expired")
 
         xml = response.json()["d"]
-
         return ET.fromstring(xml)
 
-
     except Exception as e:
-
         print("API failed:", e)
         print("Logging in again...")
 
@@ -238,20 +155,93 @@ def fetch_courses():
         )
 
         response.raise_for_status()
-
         xml = response.json()["d"]
-
         return ET.fromstring(xml)
 
-# import subprocess
 
-import tkinter as tk
-import webbrowser
-import threading
-import subprocess
+# ==========================
+# NOTIFICATIONS
+# ==========================
+
+def notify(course, name, vacancies, slot):
+    try:
+        ntfy_notify(course, name, vacancies, slot)
+    except Exception as e:
+        print(f"ntfy failed: {e}")
+
+    try:
+        email_notify(course, name, vacancies, slot)
+    except Exception as e:
+        print(f"email failed: {e}")
 
 
+def email_notify(course, name, vacancies, slot):
+    msg = EmailMessage()
+    msg["Subject"] = f"Workflow Vacancy - {course}"
+    msg["From"] = GMAIL
+    msg["To"] = TO
 
+    msg.set_content(
+        f"""
+Course    : {course}
+Name      : {name}
+Vacancies : {vacancies}
+Slot      : {slot}
+
+Workflow:
+https://workflow.iitm.ac.in/student/
+"""
+    )
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+        smtp.login(GMAIL, APP_PASSWORD)
+        smtp.send_message(msg)
+
+
+def ntfy_notify(course, name, vacancies, slot):
+    r = requests.post(
+        f"https://ntfy.sh/{NTFY_TOPIC}",
+        data=(
+            f"🎉 {course} is available!\n\n"
+            f"{name}\n"
+            f"Vacancies: {vacancies}\n"
+            f"Slot: {slot}"
+        ).encode("utf-8"),
+        headers={
+            "Title": "Workflow Vacancy",
+            "Priority": "urgent",
+            "Tags": "tada,books",
+        },
+        timeout=(10, 10),
+    )
+    r.raise_for_status()
+
+
+def heartbeat(last_seen):
+    lines = []
+    
+    courses_to_report = last_seen.keys() if WATCH_REGEX else WATCH_COURSES
+
+    for course in courses_to_report:
+        status = last_seen.get(course)
+        if status == "NOT_FOUND":
+            lines.append(f"{course}: Not Found")
+        elif status is None:
+            lines.append(f"{course}: Unknown")
+        else:
+            lines.append(f"{course}: {status} vacancies")
+
+    message = "✅ Workflow Monitor Alive\n\n" + "\n".join(lines)
+
+    try:
+        requests.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=message.encode("utf-8"),
+            headers={"Title": "Workflow Heartbeat"},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"Heartbeat failed: {e}")
 
 
 # ==========================
@@ -266,7 +256,6 @@ def get_all_courses(root):
             continue
 
         data = {}
-
         for child in course:
             tag = child.tag.split("}")[-1]
             data[tag] = (child.text or "").strip()
@@ -285,42 +274,48 @@ def get_all_courses(root):
 # ==========================
 
 def monitor():
-
     print("Watching:")
-    for c in WATCH_COURSES:
-        print("  •", c)
-
+    if WATCH_REGEX:
+        print(f"  • Regex pattern: {WATCH_REGEX}")
+    else:
+        for c in WATCH_COURSES:
+            print(f"  • {c}")
     print()
 
     last_seen = {}
+    last_heartbeat = time.time()
 
     while True:
-
         try:
+            if time.time() - last_heartbeat >= HEARTBEAT_INTERVAL:
+                heartbeat(last_seen)
+                last_heartbeat = time.time()
 
             root = fetch_courses()
             courses = get_all_courses(root)
-
             now = time.strftime("%H:%M:%S")
 
-            for code in WATCH_COURSES:
+            # Check for specifically requested courses that are not found
+            if not WATCH_REGEX:
+                for code in WATCH_COURSES:
+                    if code not in courses:
+                        if last_seen.get(code) != "NOT_FOUND":
+                            print(f"[{now}] {code} : Course not found.")
+                            last_seen[code] = "NOT_FOUND"
 
-                if code not in courses:
+            # Check for changes in tracked courses
+            for code, current in courses.items():
+                if WATCH_REGEX:
+                    if not WATCH_PATTERN.fullmatch(code):
+                        continue
+                else:
+                    if code not in WATCH_COURSES:
+                        continue
 
-                    if last_seen.get(code) != "NOT_FOUND":
-                        print(f"[{now}] {code} : Course not found.")
-                        last_seen[code] = "NOT_FOUND"
-
-                    continue
-
-                current = courses[code]
                 current_vacancies = current["vacancies"]
-
                 previous = last_seen.get(code)
 
-                # Print only when something changes
                 if previous != current_vacancies:
-
                     print(
                         f"[{now}] "
                         f"{code} | "
@@ -329,26 +324,11 @@ def monitor():
                     )
 
                     if previous is None and current_vacancies > 0:
-                        print(f"✅ {code} is currently available ({current_vacancies} vacancies)")
-                        print()
-
-                        notify(
-                            code,
-                            current["name"],
-                            current_vacancies,
-                            current["slot"],
-                        )
-
+                        print(f"✅ {code} is currently available ({current_vacancies} vacancies)\n")
+                        notify(code, current["name"], current_vacancies, current["slot"])
                     elif previous == 0 and current_vacancies > 0:
-                        print(f"🎉 {code} became available ({current_vacancies} vacancies)")
-                        print()
-
-                        notify(
-                            code,
-                            current["name"],
-                            current_vacancies,
-                            current["slot"],
-                        )
+                        print(f"🎉 {code} became available ({current_vacancies} vacancies)\n")
+                        notify(code, current["name"], current_vacancies, current["slot"])
 
                 last_seen[code] = current_vacancies
 
@@ -357,24 +337,11 @@ def monitor():
         except KeyboardInterrupt:
             print("\nStopped.")
             break
-
         except Exception as e:
             print(f"[{time.strftime('%H:%M:%S')}] Error:", e)
             time.sleep(CHECK_INTERVAL)
-            
+
+
 if __name__ == "__main__":
-    import socket
-
-    for host in [
-        "www.google.com",
-        "ntfy.sh",
-        "smtp.gmail.com",
-    ]:
-        print(f"\nResolving {host}...")
-        try:
-            print(socket.getaddrinfo(host, 443))
-        except Exception as e:
-            print(e)
     workflow_login(PROXY_PASS)
-
     monitor()
