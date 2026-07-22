@@ -338,7 +338,16 @@ def monitor():
             time.sleep(CHECK_INTERVAL)
             
 if __name__ == "__main__":
-
+    try:
+        r = requests.get("https://www.google.com", timeout=10)
+        print("Google:", r.status_code)
+    except Exception as e:
+        print("Google failed:", e)
+    try:
+        r = requests.get("https://ntfy.sh", timeout=10)
+        print("ntfy:", r.status_code)
+    except Exception as e:
+        print("ntfy failed:", e)
     workflow_login(PROXY_PASS)
 
     monitor()
