@@ -119,17 +119,21 @@ def workflow_login(workflow_password):
 import traceback
 
 def notify(course, name, vacancies, slot):
+    print("-> Sending ntfy")
     try:
         ntfy_notify(course, name, vacancies, slot)
     except Exception:
         print("ntfy failed:")
         traceback.print_exc()
 
+    print("-> Sending email")
     try:
         email_notify(course, name, vacancies, slot)
     except Exception:
         print("email failed:")
         traceback.print_exc()
+
+    print("-> notify() finished")
 import smtplib
 from email.message import EmailMessage
 
@@ -138,6 +142,7 @@ APP_PASSWORD = os.environ["MAIL_APP_PASSWORD"]
 TO = os.environ["MAIL_TO"]
 
 def email_notify(course, name, vacancies, slot):
+    print("Entered email_notify")
 
     msg = EmailMessage()
 
@@ -156,6 +161,14 @@ Workflow:
 https://workflow.iitm.ac.in/student/
 """
     )
+    print("Connecting to Gmail...")
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+        print("Connected")
+        smtp.login(GMAIL, APP_PASSWORD)
+        print("Logged in")
+        smtp.send_message(msg)
+        print("Email sent")
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(GMAIL, APP_PASSWORD)
