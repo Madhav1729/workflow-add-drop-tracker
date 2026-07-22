@@ -177,8 +177,8 @@ https://workflow.iitm.ac.in/student/
         
 def ntfy_notify(course, name, vacancies, slot):
     print("Before POST")
-
-    r = session.post(
+    print(requests.get("https://ntfy.sh", timeout=10).status_code)
+    r = requests.post(
         f"https://ntfy.sh/{NTFY_TOPIC}",
         data=(
             f"🎉 {course} is available!\n\n"
