@@ -170,7 +170,8 @@ https://workflow.iitm.ac.in/student/
         smtp.send_message(msg)
         print("Email sent")
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=15) as smtp:
+        smtp.starttls()
         smtp.login(GMAIL, APP_PASSWORD)
         smtp.send_message(msg)
         
